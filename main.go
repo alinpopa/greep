@@ -27,9 +27,10 @@ type Broker struct {
 }
 
 type Worker struct {
-	C     chan string
-	Links []string
-	Name  string
+	Work     chan string
+	Links    []string
+	Name     string
+	Checking chan bool
 }
 
 func startHeartBeat(ec *ExecutionContext) {
@@ -109,9 +110,9 @@ func getPage(url string) []string {
 	return links
 }
 
-func dispatcher(broker *Broker) {
+func dispatcher(broker *Broker, initLink string) {
 	parsedlinks := make(map[string]bool)
-	readyLinks := []string{}
+	readyLinks := []string{initLink}
 	for {
 		select {
 		case w := <-broker.Workers:
@@ -125,25 +126,30 @@ func dispatcher(broker *Broker) {
 			if len(readyLinks) != 0 {
 				link := readyLinks[0]
 				readyLinks = readyLinks[1:]
-				w.C <- link
+				w.Work <- link
+			} else {
+				w.Checking <- true
 			}
 		}
 	}
 }
 
-func worker(broker *Broker, initLink string, name string) {
+func worker(availableWorkers chan<- Worker, name string) {
 	self := Worker{
-		C:     make(chan string, 1),
-		Links: []string{initLink},
-		Name:  name,
+		Work:     make(chan string),
+		Links:    []string{},
+		Name:     name,
+		Checking: make(chan bool),
 	}
-	broker.Workers <- self
+	availableWorkers <- self
 	for {
 		select {
-		case link := <-self.C:
-			fmt.Println("Got link", link)
+		case link := <-self.Work:
+			fmt.Println(self.Name, ":Got link", link)
 			self.Links = append(getPage(link), link)
-			broker.Workers <- self
+			availableWorkers <- self
+		case <-self.Checking:
+			availableWorkers <- self
 		}
 	}
 }
@@ -165,9 +171,9 @@ func main() {
 		Status:  make(chan string),
 		Workers: make(chan Worker),
 	}
-	go worker(broker, *urlFlag, "worker1")
-	go worker(broker, *urlFlag, "worker2")
-	go dispatcher(broker)
+	go worker(broker.Workers, "worker1")
+	go worker(broker.Workers, "worker2")
+	go dispatcher(broker, *urlFlag)
 	ec := &ExecutionContext{wg: &sync.WaitGroup{}}
 	startHeartBeat(ec)
 	ec.wg.Wait()
