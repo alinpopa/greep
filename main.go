@@ -23,7 +23,7 @@ type ExecutionContext struct {
 
 type Broker struct {
 	Status  chan string
-	Workers chan *Worker
+	Workers chan Worker
 }
 
 type Worker struct {
@@ -132,7 +132,7 @@ func dispatcher(broker *Broker) {
 }
 
 func worker(broker *Broker, initLink string, name string) {
-	self := &Worker{
+	self := Worker{
 		C:     make(chan string, 1),
 		Links: []string{initLink},
 		Name:  name,
@@ -163,7 +163,7 @@ func main() {
 	}
 	broker := &Broker{
 		Status:  make(chan string),
-		Workers: make(chan *Worker),
+		Workers: make(chan Worker),
 	}
 	go worker(broker, *urlFlag, "worker1")
 	go worker(broker, *urlFlag, "worker2")
