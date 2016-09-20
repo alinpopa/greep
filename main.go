@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"github.com/alinpopa/greep/data"
 	"golang.org/x/net/html"
 	"net/http"
 	neturl "net/url"
@@ -12,29 +13,8 @@ import (
 	"time"
 )
 
-type Link struct {
-	Name  string
-	Links []Link
-}
-
-type ExecutionContext struct {
-	wg *sync.WaitGroup
-}
-
-type Broker struct {
-	Status  chan string
-	Workers chan Worker
-}
-
-type Worker struct {
-	Work     chan string
-	Links    []string
-	Name     string
-	Checking chan bool
-}
-
-func startHeartBeat(ec *ExecutionContext) {
-	ec.wg.Add(1)
+func startHeartBeat(ec *data.ExecutionContext) {
+	ec.Wg.Add(1)
 	heartbeat := time.NewTicker(2 * time.Second)
 	go func() {
 		for {
@@ -43,8 +23,8 @@ func startHeartBeat(ec *ExecutionContext) {
 	}()
 }
 
-func stopHeartBeat(ec *ExecutionContext) {
-	ec.wg.Done()
+func stopHeartBeat(ec *data.ExecutionContext) {
+	ec.Wg.Done()
 }
 
 func parseHref(rawUrl string, href string) string {
@@ -110,8 +90,9 @@ func getPage(url string) []string {
 	return links
 }
 
-func dispatcher(broker *Broker, initLink string) {
+func dispatcher(broker *data.Broker, initLink string) {
 	parsedlinks := make(map[string]bool)
+	parsedlinks[initLink] = true
 	readyLinks := []string{initLink}
 	for {
 		select {
@@ -128,28 +109,30 @@ func dispatcher(broker *Broker, initLink string) {
 				readyLinks = readyLinks[1:]
 				w.Work <- link
 			} else {
-				w.Checking <- true
+				w.Ready <- true
 			}
 		}
 	}
 }
 
-func worker(availableWorkers chan<- Worker, name string) {
-	self := Worker{
-		Work:     make(chan string),
-		Links:    []string{},
-		Name:     name,
-		Checking: make(chan bool),
+func worker(availableWorkers chan<- data.Worker, name string) {
+	self := data.Worker{
+		Work:  make(chan string),
+		Links: []string{},
+		Name:  name,
+		Ready: make(chan bool),
 	}
 	availableWorkers <- self
 	for {
 		select {
 		case link := <-self.Work:
-			fmt.Println(self.Name, ":Got link", link)
+			fmt.Println(self.Name, ": Got link", link)
 			self.Links = append(getPage(link), link)
 			availableWorkers <- self
-		case <-self.Checking:
-			availableWorkers <- self
+		case ready := <-self.Ready:
+			if ready {
+				availableWorkers <- self
+			}
 		}
 	}
 }
@@ -167,15 +150,15 @@ func main() {
 		flag.PrintDefaults()
 		os.Exit(1)
 	}
-	broker := &Broker{
+	broker := &data.Broker{
 		Status:  make(chan string),
-		Workers: make(chan Worker),
+		Workers: make(chan data.Worker),
 	}
 	go worker(broker.Workers, "worker1")
 	go worker(broker.Workers, "worker2")
 	go dispatcher(broker, *urlFlag)
-	ec := &ExecutionContext{wg: &sync.WaitGroup{}}
+	ec := &data.ExecutionContext{Wg: &sync.WaitGroup{}}
 	startHeartBeat(ec)
-	ec.wg.Wait()
+	ec.Wg.Wait()
 	fmt.Println("Done")
 }
